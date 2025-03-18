@@ -1,0 +1,341 @@
+---
+title: An R Markdown document converted from "C:/Users/Sina/Desktop/fwdotherinfoforassignment/assignment2.ipynb"
+output: html_document
+---
+
+Summary:
+Each part of the code matches typical steps described in data science projects:
+
+Exploration: Understanding the structure and nature of the data
+
+Cleaning: Removing irrelevant or corrupt data
+
+Feature Engineering: Creating new meaningful variables that can improve the model
+
+Modeling: Using linear regression and decision tree with cross-validation to make predictions
+
+Evaluation: Selecting the best model based on how well it predicts tip_amount on unseen data (week4)
+
+import the libraries and data
+
+The imported dataset is a random selection of 9000 data from the data of the second week of February
+
+```{r}
+# import libraries
+library(tidyverse)
+library(lubridate)
+library(caret)
+library(leaps)
+library(rpart)
+library(gridExtra)
+week2 <- read.csv("sampled_data.csv")
+```
+
+exploring data 
+
+Due to the problem in displaying the charts, their photos have been saved
+
+```{r}
+# get some general information about each columns
+summary(week2)
+glimpse(week2)
+```
+
+check the missing values
+
+```{r}
+# find the missing values
+missing_data <- week2 %>%
+  summarise_all(~ sum(is.na(.)))
+print(missing_data)
+```
+
+use some plot to explaining data
+
+density and histogram plot 
+
+Density plot of VendorID:
+
+This graph shows the distribution of the VendorID variable. It has a clear peak around 1.5, indicating that this is a common VendorID value in the datase.
+
+Density plot of passenger_count:
+
+This graph shows the distribution of the passenger_count variable. It has two distinct peaks, one around 2 and another around 4, suggesting there are two common passenger count values in the dataset.
+
+Density plot of trip_distance:
+
+This graph shows the distribution of the trip_distance variable. It has a high peak at around 0, indicating that short trips are very common, with a long tail of less frequent longer trips.
+
+Density plot of RatecodeID:
+
+This graph shows the distribution of the RatecodeID variable. It has a sharp peak around 1, suggesting this is the most common RatecodeID value in the dataset.
+
+```{r}
+plots <- list()
+
+numeric_columns <- week2 %>% select_if(is.numeric)
+
+for (col in colnames(numeric_columns)[1:4]) { 
+  p <- ggplot(week2, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = "blue", alpha = 0.7) +
+    labs(title = paste("Histogram of", col), x = col, y = "Count") +
+    theme_minimal()
+  
+  plots[[col]] <- p
+}
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+```{r}
+plots <- list()
+
+for (col in colnames(numeric_columns)[1:4]) {
+  p <- ggplot(week2, aes_string(x = col)) +
+    geom_density(fill = "red", alpha = 0.5) +
+    labs(title = paste("Density plot of", col), x = col, y = "Density") +
+    theme_minimal()
+  
+  plots[[col]] <- p
+}
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+box plot
+
+Boxplot of VendorID vs Tip Amount:
+
+This graph shows the relationship between VendorID and Tip Amount. The green box indicates the median and interquartile range of Tip Amount for each VendorID. The plot suggests there may be a difference in typical Tip Amounts between the two VendorID values.
+
+Boxplot of passenger_count vs Tip Amount:
+
+This graph shows the relationship between passenger_count and Tip Amount. The green boxes indicate the median and interquartile range of Tip Amount for each passenger_count value. The plot suggests that Tip Amount may be higher for trips with more passengers.
+
+Boxplot of trip_distance vs Tip Amount:
+
+This graph shows the relationship between trip_distance and Tip Amount. The green box at the bottom indicates the median and interquartile range of Tip Amount for shorter trips, while the long black line represents the wide range of Tip Amounts for longer trips.
+
+Boxplot of RatecodeID vs Tip Amount:
+
+This graph shows the relationship between RatecodeID and Tip Amount. The green box suggests there may be differences in typical Tip Amounts between the different RatecodeID values.
+
+```{r}
+library(gridExtra)
+
+plots <- list()
+
+for (col in colnames(numeric_columns)[1:4]) {  
+  if (col != "tip_amount") {
+    p <- ggplot(week2, aes_string(x = "tip_amount", y = col)) +
+      geom_boxplot(fill = "green", alpha = 0.7) +
+      labs(title = paste("Boxplot of", col, "vs Tip Amount"), x = "Tip Amount", y = col) +
+      theme_minimal()
+    
+    plots[[col]] <- p
+  }
+}
+
+do.call(grid.arrange, c(plots, ncol = 2))
+```
+
+bar plot of payment type
+
+Bar Plot of Payment Type:
+
+This bar plot shows the counts of each Payment Type in the dataset. Payment Type 1 has by far the highest count, suggesting it is the most common payment metho.
+
+```{r}
+ggplot(week2, aes(x = factor(payment_type))) +
+  geom_bar(fill = "purple") +
+  theme_minimal() +
+  labs(title = "Bar Plot of Payment Type", x = "Payment Type", y = "Count")
+```
+
+boxplot by category
+
+Boxplot of Tip Amount by Passenger Count:
+
+This graph shows how Tip Amount varies with the number of passengers. The plot indicates that Tip Amount tends to be higher for trips with more passengers.
+
+```{r}
+ggplot(week2, aes(x = factor(passenger_count), y = tip_amount)) +
+  geom_boxplot(fill = "orange", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "Boxplot of Tip Amount by Passenger Count", x = "Passenger Count", y = "Tip Amount")
+```
+
+data cleaning
+
+```{r}
+week2 <- week2 %>%
+  mutate(dropoff_datetime = tpep_dropoff_datetime,
+         pickup_datetime = tpep_pickup_datetime,
+         dow = wday(pickup_datetime,label=TRUE,abbr=TRUE, week_start = 1),                           
+         hour_trip_start = factor(hour(pickup_datetime)),                                   
+         trip_duration = -(as.numeric(difftime(dropoff_datetime,pickup_datetime,units="mins"))),    
+         payment_type_label = fct_recode(factor(payment_type), 
+                                         "Credit Card"="1",
+                                         "Cash"="2",
+                                         "No Charge"="3",
+                                         "Other"="4"))
+```
+
+remove useless coloums
+
+```{r}
+# remove the mentioned columns to make more accurate model
+week2 <- week2 %>%
+  select(-airport_fee, -congestion_surcharge, -store_and_fwd_flag, -improvement_surcharge, -tolls_amount, -mta_tax, -extra,-tpep_pickup_datetime,-tpep_dropoff_datetime,-dropoff_datetime,-pickup_datetime,-payment_type)
+```
+
+remove rows that tip amount has negative value
+
+```{r}
+#remove useless rows 
+week2 <- week2 %>%
+  filter(tip_amount > 0 & !is.na(tip_amount))
+```
+
+numerize the couloms
+
+```{r}
+# we will check the column and make sure all of it is numeric
+week2[] <- lapply(week2, function(x) {
+  if(is.factor(x) || is.character(x)) {
+    as.numeric(factor(x))
+  } else {
+    x
+  }
+})
+```
+
+find the correlations and keep the best columns to train the models
+
+```{r}
+# this code calculates the correlation betwin tip amount and each colomn
+columns_to_check <- select(week2, -tip_amount)
+correlations <- sapply(columns_to_check, function(x) cor(x, week2$tip_amount, use = "complete.obs"))
+
+correlations
+```
+
+```{r}
+# then we drop columns with less correlation
+week2 <- week2 %>%
+  select(-VendorID,-passenger_count,-dow,-hour_trip_start,-trip_duration,-payment_type_label,-total_amount)
+```
+
+Joining location data
+
+```{r}
+#import week4 data and lat and long for pickup locations and zone lookup
+week4 <- read.csv("week4.csv")
+taxi_zone_lookup <- read.csv("taxi+_zone_lookup.csv")
+taxi_latlong <- read.csv("taxilatlong.csv")
+# join week2 data with zone lookup
+week2 <- week2 %>%
+  left_join(taxi_zone_lookup, by = c("PULocationID" = "LocationID")) %>%
+  left_join(taxi_zone_lookup, by = c("DOLocationID" = "LocationID"), suffix = c("_pickup", "_dropoff"))
+```
+
+remove the missing values again
+
+```{r}
+week2 <- week2[complete.cases(week2), ]
+```
+
+make all columns numeric again
+
+```{r}
+week2[] <- lapply(week2, function(x) {
+  if(is.factor(x) || is.character(x)) {
+    as.numeric(factor(x))
+  } else {
+    x
+  }
+})
+```
+
+training models
+
+5-fold cross-validation is set up to evaluate model performance more reliably by splitting the data into 5 parts and training the model on different combinations of the data.
+
+```{r}
+train_control <- trainControl(method = "cv", number = 5) # set cross validation to learn model
+set.seed(123) # set ramdom seed
+lm_model <- train(tip_amount ~., data = week2, method = "lm", trControl = train_control) #train regression model
+set.seed(1)
+rpart_model <- train(tip_amount ~ ., data = week2, method = "rpart", trControl = train_control, 
+                     tuneLength = 3)#train decision tree model 
+```
+
+After the models are trained, predictions are made on the week4 data using both the linear regression model and the random forest model. Then, the Mean Squared Error (MSE) is calculated for each model to measure its performance.
+
+```{r}
+#preprocessing the week 4 data
+week4 <- week4 %>%
+    left_join(taxi_zone_lookup, by = c("PULocationID" = "LocationID")) %>%
+    left_join(taxi_zone_lookup, by = c("DOLocationID" = "LocationID"), suffix = c("_pickup", "_dropoff"))
+week4 <- week4 %>%
+  sample_n(9000) # choosing randomly of week4 data then make it ready for prediction
+week4[] <- lapply(week4, function(x) {
+  if(is.factor(x) || is.character(x)) {
+    as.numeric(factor(x))
+  } else {
+    x
+  }
+})
+```
+
+```{r}
+lm_predictions <- predict(lm_model, newdata = week4) # predict data using regression model
+lm_mse <- mean((week4$tip_amount - lm_predictions)^2) # calculate MSE
+rpart_predictions <- predict(rpart_model, newdata = week4)# predict data using decision tree
+rpart_mse <- mean((week4$tip_amount - rpart_predictions)^2) # # calculate MSE
+```
+
+```{r}
+cat("Linear Regression MSE: ", lm_mse, "\n") # showing the results
+cat("Decision Tree MSE: ", rpart_mse, "\n")
+best_model <- ifelse(lm_mse < rpart_mse, "Linear Regression", "decision tree")
+cat("Best model is: ", best_model, "\n")
+```
+
+Explanation of the Linear Regression and Decision Tree Models:
+1. Linear Regression Model:
+The linear regression model attempts to model the linear relationship between the input variables (independent) and the target variable (tip_amount). The linear equation is:
+Coefficients: These values indicate the influence of each feature on tip_amount. For example, trip_distance has a positive coefficient, meaning that as the distance increases, the tip amount tends to increase.
+MSE (Mean Squared Error): The MSE for the linear regression model is 12.48346, representing the average squared difference between the predicted and actual values. A lower MSE indicates a more accurate model.
+2. Decision Tree Model:
+The decision tree model, instead of creating a linear relationship, recursively splits the data into smaller groups and predicts a constant value for tip_amount in each segment.
+
+MSE (Mean Squared Error): The MSE for the decision tree model is 9.932561, which is lower than that of the linear regression model. This suggests that the decision tree model performs better in this case.
+3. Choosing the Better Model:
+Since the MSE of the decision tree model is lower than that of the linear regression model, it is concluded that the decision tree model is more accurate and is chosen as the best model in this scenario.
+
+```{r}
+library(rpart.plot)
+varImp(rpart_model)
+```
+
+explain regression model
+
+```{r}
+coefficients <- coef(lm_model$finalModel)
+
+coef_df <- data.frame(
+  Term = names(coefficients),
+  Estimate = coefficients
+)
+ggplot(coef_df, aes(x = reorder(Term, Estimate), y = Estimate)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  labs(title = "Coefficients of Linear Model", x = "Term", y = "Estimate") +
+  theme_minimal()
+```
+
+```{r}
+coefficients
+```
+
